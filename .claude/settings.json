@@ -1,0 +1,32 @@
+{
+  "model": "claude-sonnet-4-5",
+  "agents": {
+    "implementer": {
+      "model": "claude-sonnet-4-5",
+      "description": "Implementation — mechanical, well-specified code"
+    },
+    "reviewer": {
+      "model": "claude-opus-4-5",
+      "description": "Security review, spec compliance, payment code"
+    }
+  },
+  "modelRouting": {
+    "architecture_decisions": "opus",
+    "implementation": "sonnet",
+    "tests": "sonnet",
+    "security_review": "opus",
+    "documentation": "sonnet",
+    "data_research": "flash"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm run build)",
+      "Bash(npm run typecheck)",
+      "Bash(pytest)",
+      "Bash(git status)",
+      "Bash(git log*)",
+      "Bash(git diff*)"
+    ]
+  }
+}
