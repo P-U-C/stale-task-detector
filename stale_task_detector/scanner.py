@@ -58,6 +58,9 @@ def _validate_task(task: TaskRecord, now: float) -> list[str]:
         errors.append("created_at after last_activity_at")
     if task.pft_value < 0 or not math.isfinite(task.pft_value):
         errors.append("invalid pft_value")
+    if task.verification_submitted_at is not None:
+        if not math.isfinite(task.verification_submitted_at) or task.verification_submitted_at > now:
+            errors.append("invalid verification_submitted_at")
     return errors
 
 

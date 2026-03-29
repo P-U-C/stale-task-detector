@@ -20,7 +20,7 @@ PYTHONPATH=. pytest tests/ -v
 pytest tests/ -v
 ```
 
-All 16 tests should pass. No network or wall-clock dependencies.
+All 28 tests should pass. No network or wall-clock dependencies.
 
 ---
 
@@ -39,8 +39,8 @@ tasks = [
     TaskRecord("task-004", "in_progress", now - 65*86400, now - 61*86400, "unknown_user", pft_value=0.0),
 ]
 
-results = scan_tasks(tasks)
-for r in results:
+scan_result = scan_tasks(tasks)
+for r in scan_result.stale:
     print(f"{r.task_id}  {r.tier.value:12s}  {r.days_stale:.0f}d  {r.recommended_action}")
 
 # task-001  auto-expire   68d  expire
@@ -48,7 +48,7 @@ for r in results:
 # task-003  critical      31d  escalate
 # task-002  warning       27d  nudge
 
-notifications = build_notification_batch(results)
+notifications = build_notification_batch(scan_result.stale)
 print(to_json(notifications))
 ```
 

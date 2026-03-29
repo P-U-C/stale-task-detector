@@ -323,3 +323,27 @@ def test_notification_includes_provenance():
     assert n["thresholds_used"]["warning_days"] == 14.0
     assert n["scan_id"] == "scan-001"
     assert "owner_resolution_required" in n
+
+
+def test_future_verification_submitted_at_is_invalid():
+    """verification_submitted_at in the future should be rejected."""
+    task = TaskRecord(
+        "t-future-vsub", "in_progress",
+        NOW - 86400*60, NOW - 86400*60, "0xabc",
+        verification_submitted_at=NOW + 86400*5,
+    )
+    result = scan_tasks([task], now=NOW)
+    assert any("t-future-vsub" in inv[0] for inv in result.invalid)
+    assert len(result.stale) == 0
+
+def test_nan_verification_submitted_at_is_invalid():
+    """verification_submitted_at=NaN should be rejected."""
+    import math
+    task = TaskRecord(
+        "t-nan-vsub", "in_progress",
+        NOW - 86400*60, NOW - 86400*60, "0xabc",
+        verification_submitted_at=float("nan"),
+    )
+    result = scan_tasks([task], now=NOW)
+    assert any("t-nan-vsub" in inv[0] for inv in result.invalid)
+
