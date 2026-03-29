@@ -32,7 +32,7 @@ class TaskRecord:
     last_activity_at: float        # unix timestamp of last update/submission
     owner: str                     # wallet address or "unknown_user"
     pft_value: float = 0.0
-    has_verification_submission: bool = False  # True if owner submitted for verification
+    verification_submitted_at: float | None = None  # unix timestamp when submitted for verification; None = not submitted
 
 
 @dataclass
@@ -46,3 +46,4 @@ class StalenessResult:
     last_activity_at: float
     is_unknown_owner: bool         # True if owner == "unknown_user" or empty
     notes: list[str] = field(default_factory=list)
+    owner_resolution_required: bool = False  # True if owner is unknown/empty — requires manual reclaim regardless of tier

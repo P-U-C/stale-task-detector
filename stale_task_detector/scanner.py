@@ -2,28 +2,31 @@
 scanner.py — Staleness scanner for the Task Node adjudication pipeline.
 
 Scanning logic:
-    1. Only tasks with status == "in_progress" are scanned.
-       Tasks submitted for verification (has_verification_submission=True)
-       are exempt even if they exceed the warning threshold — the owner
-       acted; the network owes them a decision.
-    2. Days stale is computed from last_activity_at (not created_at),
-       so a task that had recent activity is not penalized for an old
-       creation date.
-    3. Results are sorted descending by days_stale (most urgent first).
+    1. Only tasks with status == "in_progress" are scanned (case-insensitive).
+    2. Tasks submitted for verification recently (within auto_expire threshold)
+       are exempt — the owner acted; the network owes them a decision.
+       If verification_submitted_at is itself stale, the task is flagged.
+    3. Days stale is computed from last_activity_at (not created_at).
+    4. Results are sorted descending by days_stale (most urgent first).
        Ties broken by task_id ascending (deterministic).
-    4. unknown_user owner is handled gracefully — flagged in is_unknown_owner,
-       recommended_action defaults to "expire" at WARNING tier (no owner to
-       nudge, reclaim slot immediately).
+    5. unknown_user owner is flagged via owner_resolution_required=True;
+       recommended_action still follows tier (not overridden).
 
 Integration with Authorization Gate cooldown:
     AUTO_EXPIRE results should be fed into the cooldown escalation logic
-    defined in the Auth Gate enforcement spec. An AUTO_EXPIRE recommendation
-    translates to: set owner state to PROBATIONARY, block new task acceptance
-    for cooldown_period_days, emit expiry event to chain envelope.
+    defined in the Auth Gate enforcement spec.
 """
+import math
 import time
+from dataclasses import dataclass
 from stale_task_detector.schema import TaskRecord, StalenessResult, Tier
 from stale_task_detector.thresholds import Thresholds, DEFAULT_THRESHOLDS
+
+
+@dataclass
+class ScanResult:
+    stale: list[StalenessResult]
+    invalid: list[tuple[str, str]]  # (task_id, reason)
 
 
 def _classify_tier(days: float, t: Thresholds) -> Tier:
@@ -34,10 +37,7 @@ def _classify_tier(days: float, t: Thresholds) -> Tier:
     return Tier.WARNING
 
 
-def _recommended_action(tier: Tier, is_unknown: bool) -> str:
-    if is_unknown:
-        # No owner to notify — escalate directly to expire
-        return "expire"
+def _recommended_action(tier: Tier) -> str:
     return {
         Tier.WARNING: "nudge",
         Tier.CRITICAL: "escalate",
@@ -45,11 +45,27 @@ def _recommended_action(tier: Tier, is_unknown: bool) -> str:
     }[tier]
 
 
+def _validate_task(task: TaskRecord, now: float) -> list[str]:
+    """Return list of validation error strings; empty means valid."""
+    errors = []
+    if not task.task_id or not task.task_id.strip():
+        errors.append("empty task_id")
+    if not math.isfinite(task.last_activity_at) or task.last_activity_at <= 0:
+        errors.append("invalid timestamp")
+    elif task.last_activity_at > now:
+        errors.append("future last_activity_at")
+    if task.created_at > task.last_activity_at:
+        errors.append("created_at after last_activity_at")
+    if task.pft_value < 0 or not math.isfinite(task.pft_value):
+        errors.append("invalid pft_value")
+    return errors
+
+
 def scan_tasks(
     tasks: list[TaskRecord],
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
     now: float | None = None,
-) -> list[StalenessResult]:
+) -> ScanResult:
     """
     Scan a list of TaskRecords and return stale tasks ranked by severity.
 
@@ -60,20 +76,29 @@ def scan_tasks(
              injectable for deterministic testing)
 
     Returns:
-        list of StalenessResult, sorted descending by days_stale.
-        Only tasks with status=="in_progress" AND has_verification_submission==False
-        AND days_stale >= thresholds.warning_days are included.
+        ScanResult with .stale (sorted descending by days_stale) and .invalid list.
     """
     if now is None:
         now = time.time()
 
     results: list[StalenessResult] = []
+    invalid: list[tuple[str, str]] = []
 
     for task in tasks:
-        if task.status != "in_progress":
+        errors = _validate_task(task, now)
+        if errors:
+            invalid.append((task.task_id, "; ".join(errors)))
             continue
-        if task.has_verification_submission:
-            continue  # owner acted — exempt from expiry
+
+        if task.status.strip().lower() != "in_progress":
+            continue
+
+        # Exempt if submitted for verification AND submission is recent
+        if task.verification_submitted_at is not None:
+            days_since_submission = (now - task.verification_submitted_at) / 86400.0
+            if days_since_submission < thresholds.auto_expire_days:
+                continue  # awaiting adjudication, not abandoned
+            # else: submission is itself stale — fall through and flag it
 
         days_stale = (now - task.last_activity_at) / 86400.0
 
@@ -82,7 +107,7 @@ def scan_tasks(
 
         tier = _classify_tier(days_stale, thresholds)
         is_unknown = task.owner in ("unknown_user", "", None)
-        action = _recommended_action(tier, is_unknown)
+        action = _recommended_action(tier)
 
         notes = []
         if is_unknown:
@@ -100,8 +125,9 @@ def scan_tasks(
             last_activity_at=task.last_activity_at,
             is_unknown_owner=is_unknown,
             notes=notes,
+            owner_resolution_required=is_unknown,
         ))
 
     # Sort descending by days_stale, ties broken by task_id ascending
     results.sort(key=lambda r: (-r.days_stale, r.task_id))
-    return results
+    return ScanResult(stale=results, invalid=invalid)

@@ -52,7 +52,7 @@ notifications = build_notification_batch(results)
 print(to_json(notifications))
 ```
 
-3 of 4 tasks are flagged. Results are ranked most-urgent first.
+4 of 4 tasks are flagged. Results are ranked most-urgent first.
 
 ---
 
